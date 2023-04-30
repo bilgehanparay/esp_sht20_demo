@@ -177,7 +177,7 @@ void printUserByte(SHT20_User_Byte_st user_byte){
             reso = "UNKNOWN";
         break;
     }
-    printf("OTP: %s HEATER: %s BATT_STAT: %s RESOLUTION: %s", otp, heat, battStat, reso);
+    printf("OTP: %s HEATER: %s BATT_STAT: %s RESOLUTION: %s\n", otp, heat, battStat, reso);
 }
 
 // execute soft reset
@@ -197,22 +197,60 @@ void execSoftReset(SHT20_config_st *sht_config){
 // https://esp32.com/viewtopic.php?f=2&t=8715
 float getTMeasurement(SHT20_config_st *sht_config){
     float t = 0;
-    uint8_t bytes[3]={0};
+    uint8_t byte0 = 0;
+    uint8_t byte1 = 0;
+    uint8_t byte2 = 0;
+    i2c_set_timeout(sht_config->i2c_num, 1048575);
+    // Issue temp read command with no hold mode
     i2c_cmd_handle_t cmd_handle = i2c_cmd_link_create();
-    i2c_master_start(cmd_handle);
-    i2c_master_write_byte(cmd_handle, SHT20_WRITE, true);
-    i2c_master_write_byte(cmd_handle, TRIGGER_T_MEASUREMENT_HOLD_MASTER, true);
-
-    i2c_master_start(cmd_handle);
-    i2c_master_write_byte(cmd_handle, SHT20_READ, true);
-    esp_err_t ret = i2c_master_read(cmd_handle, &bytes, 3, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd_handle);
-    
-    i2c_master_cmd_begin(sht_config->i2c_num, cmd_handle, sht_config->timeout/ portTICK_PERIOD_MS);
+    ESP_ERROR_CHECK(i2c_master_start(cmd_handle));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd_handle, SHT20_WRITE, true));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd_handle, TRIGGER_T_MEASUREMENT, true));
+    ESP_ERROR_CHECK(i2c_master_stop(cmd_handle));
+    esp_err_t comm_ok = i2c_master_cmd_begin(sht_config->i2c_num, 
+                                             cmd_handle, 
+                                             sht_config->timeout/ portTICK_PERIOD_MS);
+    // TODO: is this necessary?
+    //i2c_cmd_link_delete(cmd_handle);
+    if(comm_ok == ESP_OK){
+        printf("t measurment, write OK\n");
+    }else{
+        printf("t measurement, command write fail, err: %s\n", esp_err_to_name(comm_ok));
+    }
+    // wait for 100 ms for the sensor to complete measurement
+    vTaskDelay(100/portTICK_PERIOD_MS);
+    // Poll the measurement
+    int i = 0;
+    do{
+        //i2c_cmd_handle_t cmd_handle_ =  i2c_cmd_link_create();
+        ESP_ERROR_CHECK(i2c_master_start(cmd_handle));
+        ESP_ERROR_CHECK(i2c_master_write_byte(cmd_handle, SHT20_READ, true));
+        ESP_ERROR_CHECK(i2c_master_read(cmd_handle, &byte0, 1, I2C_MASTER_ACK));
+        ESP_ERROR_CHECK(i2c_master_read(cmd_handle, &byte1, 1, I2C_MASTER_ACK));
+        ESP_ERROR_CHECK(i2c_master_read(cmd_handle, &byte2, 1, I2C_MASTER_NACK));
+        (i2c_master_cmd_begin(sht_config->i2c_num, 
+                                cmd_handle,
+                                sht_config->timeout/portTICK_PERIOD_MS));
+        //i2c_cmd_link_delete(cmd_handle_);
+        vTaskDelay(10/portTICK_PERIOD_MS);
+        if(comm_ok == ESP_OK){
+            printf("read was OK, sensor returned ACK\n");
+            break;
+        }else if(comm_ok == ESP_FAIL || comm_ok == ESP_ERR_TIMEOUT){
+            printf("sensor did not returned ACK\n");
+            //cmd_handle_ = i2c_cmd_link_create();
+            ESP_ERROR_CHECK(i2c_master_stop(cmd_handle));
+            ESP_ERROR_CHECK(i2c_master_cmd_begin(sht_config->i2c_num, 
+                                       cmd_handle,
+                                       sht_config->timeout/portTICK_PERIOD_MS));
+            //i2c_cmd_link_delete(cmd_handle_);
+        }else{
+            printf("temp read returned error %s\n", esp_err_to_name(comm_ok));
+        }
+        vTaskDelay(100/portTICK_PERIOD_MS);
+    }while(i++ < 10);
     i2c_cmd_link_delete(cmd_handle);
-    uint8_t byte0 = bytes[0];
-    uint8_t byte1 = bytes[1];
-    uint8_t byte2 = bytes[2];
+
     // parse measurement
     // TODO: Check checksum
     /* This calculations are from Chapter 6 of SHT20 Datasheet*/
@@ -221,7 +259,6 @@ float getTMeasurement(SHT20_config_st *sht_config){
     printf("stat error\n");
         //return 0; // error
     }
-    printf("ret: %d\n", ret);
     // 2. Clear stat bit for temperature calculation
     byte1 = CLEAR_BIT(byte1, 1); 
     byte1 = CLEAR_BIT(byte1, 0); 

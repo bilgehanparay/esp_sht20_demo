@@ -21,6 +21,7 @@
         "string": "c",
         "esp_types.h": "c",
         "stdint.h": "c",
-        "freertos.h": "c"
+        "freertos.h": "c",
+        "*.ipp": "c"
     }
 }

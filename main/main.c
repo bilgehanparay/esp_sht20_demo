@@ -30,12 +30,12 @@ SHT20_config_st sht_config;
 void task1(void *params){
     while(true){
         SHT20_User_Byte_st user_byte = getUserByte(&sht_config);
-        //printUserByte(user_byte);
-        //printf("\n");
+        printUserByte(user_byte);
+        printf("\n");
         float t = getTMeasurement(&sht_config);
         //float rh = getRHMeasurement(&sht_config);
         printf("Temp: %f C\n", t);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
 }
 
